@@ -32,6 +32,7 @@ import { AttendanceSheet } from './components/AttendanceSheet';
 import { DailySummary } from './components/DailySummary';
 import { HistoryLog } from './components/HistoryLog';
 import { SpreadsheetManagerModal } from './components/SpreadsheetManagerModal';
+import { AuthErrorModal, AuthErrorInfo } from './components/AuthErrorModal';
 
 export default function App() {
   // Navigation
@@ -42,6 +43,8 @@ export default function App() {
   const [isLoggingIn, setIsLoggingIn] = useState(false);
   const [sheetConfig, setSheetConfig] = useState<SheetConfig | null>(() => getSavedSheetConfig());
   const [isSheetModalOpen, setIsSheetModalOpen] = useState(false);
+  const [authErrorInfo, setAuthErrorInfo] = useState<AuthErrorInfo | null>(null);
+  const [isAuthErrorModalOpen, setIsAuthErrorModalOpen] = useState(false);
 
   // Teacher & Class Selection State
   const initialProfile = getSavedTeacherProfile();
@@ -109,7 +112,24 @@ export default function App() {
       }
     } catch (err: any) {
       console.error('Google Sign in failed:', err);
-      alert(err.message || 'Gagal masuk dengan Google.');
+      // Suppress raw alert and show the dedicated friendly AuthErrorModal
+      const isDomainErr =
+        err?.code === 'auth/unauthorized-domain' ||
+        (typeof err?.message === 'string' && err.message.includes('auth/unauthorized-domain')) ||
+        (typeof err?.message === 'string' && err.message.includes('unauthorized-domain'));
+
+      // If user simply closed the popup window, don't show an intrusive error
+      if (err?.code === 'auth/popup-closed-by-user' || err?.code === 'auth/cancelled-popup-request') {
+        return;
+      }
+
+      setAuthErrorInfo({
+        code: err?.code || (isDomainErr ? 'auth/unauthorized-domain' : 'auth/error'),
+        message: err?.message || 'Gagal masuk dengan Google.',
+        domain: typeof window !== 'undefined' ? window.location.hostname : '',
+        rawError: err,
+      });
+      setIsAuthErrorModalOpen(true);
     } finally {
       setIsLoggingIn(false);
     }
@@ -311,6 +331,14 @@ export default function App() {
         onStudentsUpdated={handleStudentsUpdated}
         isLoggedIn={Boolean(user)}
         onTriggerLogin={handleGoogleLogin}
+      />
+
+      {/* Auth Error & Domain Authorization Guide Modal */}
+      <AuthErrorModal
+        isOpen={isAuthErrorModalOpen}
+        onClose={() => setIsAuthErrorModalOpen(false)}
+        errorInfo={authErrorInfo}
+        onRetryLogin={handleGoogleLogin}
       />
     </div>
   );
