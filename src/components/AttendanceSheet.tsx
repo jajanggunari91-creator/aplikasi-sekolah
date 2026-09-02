@@ -185,7 +185,8 @@ export const AttendanceSheet: React.FC<AttendanceSheetProps> = ({
 
     const now = new Date();
     const timeStr = now.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' });
-    const recordId = `ABS-${Date.now()}-${selectedClass.replace(/\s+/g, '')}`;
+    const randomSalt = Math.random().toString(36).substring(2, 8).toUpperCase();
+    const recordId = `ABS-${Date.now()}-${randomSalt}-${selectedClass.replace(/\s+/g, '')}`;
 
     const newRecord: AttendanceRecord = {
       id: recordId,

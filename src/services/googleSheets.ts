@@ -19,6 +19,40 @@ export const parseSpreadsheetId = (input: string): string => {
   return trimmed;
 };
 
+// Helper to execute fetch with exponential backoff & jitter for multi-user concurrency safety
+const fetchWithRetry = async (
+  url: string,
+  options: RequestInit,
+  maxRetries = 3
+): Promise<Response> => {
+  let attempt = 0;
+  while (attempt < maxRetries) {
+    try {
+      const response = await fetch(url, options);
+      // If server returns rate limit (429) or transient Google server error (500, 502, 503, 504)
+      if ([429, 500, 502, 503, 504].includes(response.status) && attempt < maxRetries - 1) {
+        attempt++;
+        // Exponential backoff with random jitter: (500 * 2^attempt) + random(100, 400)ms
+        const delay = Math.pow(2, attempt) * 400 + Math.floor(Math.random() * 300);
+        console.warn(`[Concurrency Retry] Google API status ${response.status}. Retrying in ${delay}ms (Attempt ${attempt}/${maxRetries})...`);
+        await new Promise((resolve) => setTimeout(resolve, delay));
+        continue;
+      }
+      return response;
+    } catch (err: any) {
+      if (attempt < maxRetries - 1) {
+        attempt++;
+        const delay = Math.pow(2, attempt) * 400 + Math.floor(Math.random() * 300);
+        console.warn(`[Network Retry] Fetch error. Retrying in ${delay}ms...`, err);
+        await new Promise((resolve) => setTimeout(resolve, delay));
+        continue;
+      }
+      throw err;
+    }
+  }
+  return fetch(url, options);
+};
+
 // Helper to format Google API errors clearly
 const formatGoogleError = (status: number, rawMessage?: string): string => {
   const msg = rawMessage || '';
@@ -44,7 +78,7 @@ export const listSpreadsheets = async (): Promise<DriveSpreadsheetItem[]> => {
   if (!token) throw new Error('Silakan login dengan Google terlebih dahulu.');
 
   const query = encodeURIComponent("mimeType='application/vnd.google-apps.spreadsheet' and trashed=false");
-  const response = await fetch(
+  const response = await fetchWithRetry(
     `https://www.googleapis.com/drive/v3/files?q=${query}&fields=files(id,name,modifiedTime,webViewLink)&orderBy=modifiedTime desc&pageSize=30`,
     {
       headers: {
@@ -68,7 +102,7 @@ export const getSpreadsheetMetadata = async (spreadsheetId: string) => {
   if (!token) throw new Error('Silakan login dengan Google terlebih dahulu.');
 
   const cleanId = parseSpreadsheetId(spreadsheetId);
-  const response = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${cleanId}`, {
+  const response = await fetchWithRetry(`https://sheets.googleapis.com/v4/spreadsheets/${cleanId}`, {
     headers: {
       Authorization: `Bearer ${token}`,
     },
@@ -101,7 +135,7 @@ export const fetchStudentsFromSpreadsheet = async (
   const cleanId = parseSpreadsheetId(spreadsheetId);
   const encodedRange = encodeURIComponent(`${sheetName}!A1:Z100`);
 
-  const response = await fetch(
+  const response = await fetchWithRetry(
     `https://sheets.googleapis.com/v4/spreadsheets/${cleanId}/values/${encodedRange}`,
     {
       headers: {
@@ -198,7 +232,7 @@ export const createMasterAttendanceSpreadsheet = async (
     ],
   };
 
-  const response = await fetch('https://sheets.googleapis.com/v4/spreadsheets', {
+  const response = await fetchWithRetry('https://sheets.googleapis.com/v4/spreadsheets', {
     method: 'POST',
     headers: {
       Authorization: `Bearer ${token}`,
@@ -271,7 +305,7 @@ export const createMasterAttendanceSpreadsheet = async (
   });
 
   // Batch update values
-  await fetch(
+  await fetchWithRetry(
     `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values:batchUpdate`,
     {
       method: 'POST',
@@ -329,7 +363,7 @@ export const appendAttendanceRecordToSheet = async (
     range
   )}:append?valueInputOption=USER_ENTERED&insertDataOption=INSERT_ROWS`;
 
-  const response = await fetch(url, {
+  const response = await fetchWithRetry(url, {
     method: 'POST',
     headers: {
       Authorization: `Bearer ${token}`,
