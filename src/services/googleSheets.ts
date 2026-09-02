@@ -19,6 +19,25 @@ export const parseSpreadsheetId = (input: string): string => {
   return trimmed;
 };
 
+// Helper to format Google API errors clearly
+const formatGoogleError = (status: number, rawMessage?: string): string => {
+  const msg = rawMessage || '';
+  if (
+    msg.toLowerCase().includes('insufficient authentication scopes') ||
+    msg.toLowerCase().includes('insufficient scope') ||
+    msg.toLowerCase().includes('insufficient permissions')
+  ) {
+    return 'Izin pembuatan/pengeditan Google Sheets belum disetujui pada akun Google Anda. Silakan klik tombol "Beri Izin Akses Google Sheets" untuk menyetujui akses.';
+  }
+  if (status === 401) {
+    return 'Sesi login Google telah berakhir. Silakan login ulang.';
+  }
+  if (status === 403) {
+    return msg || 'Akses ditolak (403). Pastikan akun Anda memiliki izin Google Sheets dan Google Drive.';
+  }
+  return msg || `Terjadi kesalahan pada layanan Google (${status})`;
+};
+
 // List user's spreadsheets from Google Drive
 export const listSpreadsheets = async (): Promise<DriveSpreadsheetItem[]> => {
   const token = await getAccessToken();
@@ -36,7 +55,7 @@ export const listSpreadsheets = async (): Promise<DriveSpreadsheetItem[]> => {
 
   if (!response.ok) {
     const errorData = await response.json().catch(() => ({}));
-    throw new Error(errorData.error?.message || `Gagal mengambil daftar spreadsheet (${response.status})`);
+    throw new Error(formatGoogleError(response.status, errorData.error?.message));
   }
 
   const data = await response.json();
@@ -57,7 +76,7 @@ export const getSpreadsheetMetadata = async (spreadsheetId: string) => {
 
   if (!response.ok) {
     const errorData = await response.json().catch(() => ({}));
-    throw new Error(errorData.error?.message || `Gagal membuka spreadsheet (${response.status})`);
+    throw new Error(formatGoogleError(response.status, errorData.error?.message || `Gagal membuka spreadsheet (${response.status})`));
   }
 
   const data = await response.json();
@@ -93,7 +112,7 @@ export const fetchStudentsFromSpreadsheet = async (
 
   if (!response.ok) {
     const errorData = await response.json().catch(() => ({}));
-    throw new Error(errorData.error?.message || `Gagal membaca sheet ${sheetName}`);
+    throw new Error(formatGoogleError(response.status, errorData.error?.message || `Gagal membaca sheet ${sheetName}`));
   }
 
   const data = await response.json();
@@ -190,7 +209,7 @@ export const createMasterAttendanceSpreadsheet = async (
 
   if (!response.ok) {
     const errorData = await response.json().catch(() => ({}));
-    throw new Error(errorData.error?.message || 'Gagal membuat spreadsheet baru di Google Drive.');
+    throw new Error(formatGoogleError(response.status, errorData.error?.message || 'Gagal membuat spreadsheet baru di Google Drive.'));
   }
 
   const createdSheet = await response.json();

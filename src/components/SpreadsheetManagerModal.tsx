@@ -12,6 +12,8 @@ import {
   AlertCircle,
   FileCheck,
   Layers,
+  KeyRound,
+  ShieldCheck,
 } from 'lucide-react';
 import { SheetConfig, Student, ClassGrade } from '../types';
 import {
@@ -22,6 +24,7 @@ import {
   DriveSpreadsheetItem,
   parseSpreadsheetId,
 } from '../services/googleSheets';
+import { googleSignIn } from '../services/googleAuth';
 import { ConfirmationModal } from './ConfirmationModal';
 
 interface SpreadsheetManagerModalProps {
@@ -50,7 +53,8 @@ export const SpreadsheetManagerModal: React.FC<SpreadsheetManagerModalProps> = (
   const [isCreating, setIsCreating] = useState(false);
   const [isConnecting, setIsConnecting] = useState(false);
   const [isRefreshingStudents, setIsRefreshingStudents] = useState(false);
-  const [statusMessage, setStatusMessage] = useState<{ text: string; type: 'success' | 'error' } | null>(null);
+  const [isGrantingScope, setIsGrantingScope] = useState(false);
+  const [statusMessage, setStatusMessage] = useState<{ text: string; type: 'success' | 'error'; isScopeError?: boolean } | null>(null);
 
   // Confirmation modal
   const [confirmCreateOpen, setConfirmCreateOpen] = useState(false);
@@ -70,8 +74,39 @@ export const SpreadsheetManagerModal: React.FC<SpreadsheetManagerModalProps> = (
       setUserSpreadsheets(files);
     } catch (e: any) {
       console.warn('Could not load drive list:', e.message);
+      if (
+        e.message?.toLowerCase().includes('scope') ||
+        e.message?.toLowerCase().includes('izin')
+      ) {
+        setStatusMessage({
+          text: e.message,
+          type: 'error',
+          isScopeError: true,
+        });
+      }
     } finally {
       setIsLoadingList(false);
+    }
+  };
+
+  const handleGrantScopes = async () => {
+    setIsGrantingScope(true);
+    try {
+      await googleSignIn(true);
+      setStatusMessage({
+        text: 'Izin akses Google Sheets & Drive berhasil diberikan! Silakan buat atau hubungkan spreadsheet sekarang.',
+        type: 'success',
+        isScopeError: false,
+      });
+      loadDriveList();
+    } catch (err: any) {
+      setStatusMessage({
+        text: err.message || 'Gagal memperbarui izin login Google.',
+        type: 'error',
+        isScopeError: true,
+      });
+    } finally {
+      setIsGrantingScope(false);
     }
   };
 
@@ -97,9 +132,14 @@ export const SpreadsheetManagerModal: React.FC<SpreadsheetManagerModalProps> = (
       setActiveTab('status');
       loadDriveList();
     } catch (err: any) {
+      const isScope =
+        err.message?.toLowerCase().includes('scope') ||
+        err.message?.toLowerCase().includes('izin') ||
+        err.message?.toLowerCase().includes('insufficient');
       setStatusMessage({
         text: err.message || 'Gagal membuat spreadsheet baru.',
         type: 'error',
+        isScopeError: isScope,
       });
     } finally {
       setIsCreating(false);
@@ -135,9 +175,14 @@ export const SpreadsheetManagerModal: React.FC<SpreadsheetManagerModalProps> = (
       });
       setActiveTab('status');
     } catch (err: any) {
+      const isScope =
+        err.message?.toLowerCase().includes('scope') ||
+        err.message?.toLowerCase().includes('izin') ||
+        err.message?.toLowerCase().includes('insufficient');
       setStatusMessage({
         text: err.message || 'Gagal membuka spreadsheet. Pastikan izin akses telah diberikan.',
         type: 'error',
+        isScopeError: isScope,
       });
     } finally {
       setIsConnecting(false);
@@ -270,18 +315,32 @@ export const SpreadsheetManagerModal: React.FC<SpreadsheetManagerModalProps> = (
           {/* Status Message */}
           {statusMessage && (
             <div
-              className={`p-3.5 rounded-xl text-xs font-semibold flex items-center gap-2 ${
+              className={`p-4 rounded-xl text-xs font-semibold flex flex-col sm:flex-row sm:items-center justify-between gap-3 ${
                 statusMessage.type === 'success'
                   ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'
                   : 'bg-rose-500/20 text-rose-300 border border-rose-500/30'
               }`}
             >
-              {statusMessage.type === 'success' ? (
-                <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
-              ) : (
-                <AlertCircle className="w-4 h-4 text-rose-400 shrink-0" />
+              <div className="flex items-start gap-2.5">
+                {statusMessage.type === 'success' ? (
+                  <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" />
+                ) : (
+                  <AlertCircle className="w-4 h-4 text-rose-400 shrink-0 mt-0.5" />
+                )}
+                <span className="leading-relaxed">{statusMessage.text}</span>
+              </div>
+
+              {statusMessage.isScopeError && (
+                <button
+                  type="button"
+                  disabled={isGrantingScope}
+                  onClick={handleGrantScopes}
+                  className="px-3.5 py-1.5 bg-blue-600 hover:bg-blue-500 text-white rounded-lg font-bold flex items-center justify-center gap-1.5 transition-all shrink-0 cursor-pointer shadow-md shadow-blue-600/30 disabled:opacity-50"
+                >
+                  <KeyRound className={`w-3.5 h-3.5 ${isGrantingScope ? 'animate-spin' : ''}`} />
+                  <span>{isGrantingScope ? 'Memproses...' : 'Beri Izin Akses Google Sheets'}</span>
+                </button>
               )}
-              <span>{statusMessage.text}</span>
             </div>
           )}
 
