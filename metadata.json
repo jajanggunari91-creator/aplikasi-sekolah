@@ -1,0 +1,6 @@
+{
+  "name": "Absensi Guru Mapel TJKT",
+  "description": "Aplikasi absensi guru mata pelajaran modern terintegrasi Google Spreadsheet dengan rekapitulasi kehadiran harian otomatis.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
