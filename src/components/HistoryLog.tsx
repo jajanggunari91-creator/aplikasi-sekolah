@@ -366,10 +366,11 @@ export const HistoryLog: React.FC<HistoryLogProps> = ({
           syncModalRecord
             ? [
                 { label: 'Kelas', value: syncModalRecord.className },
+                { label: 'Target Sheet', value: `Absensi ${syncModalRecord.className}` },
                 { label: 'Mata Pelajaran', value: syncModalRecord.subject },
                 { label: 'Tanggal', value: syncModalRecord.date },
                 { label: 'Total Siswa', value: `${syncModalRecord.totalStudents} Siswa` },
-                { label: 'Target Sheet', value: sheetConfig?.spreadsheetTitle || '-' },
+                { label: 'Spreadsheet', value: sheetConfig?.spreadsheetTitle || '-' },
               ]
             : []
         }

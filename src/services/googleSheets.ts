@@ -189,7 +189,93 @@ export const fetchStudentsFromSpreadsheet = async (
   return students;
 };
 
-// Create a complete, beautifully structured Attendance Spreadsheet on user's Google Drive
+// Standard headers for Attendance sheets
+export const ATTENDANCE_HEADERS = [
+  'ID Sesi',
+  'Timestamp',
+  'Tanggal',
+  'Jam Ke',
+  'Guru Pengampu',
+  'Mata Pelajaran',
+  'Kelas',
+  'NIS',
+  'Nama Siswa',
+  'L/P',
+  'Status Kehadiran (H/I/S/A)',
+  'Keterangan',
+  'Materi / Topik Bahasan',
+  'Persentase Sesi (%)',
+];
+
+// Helper to get attendance sheet name based on class
+export const getTargetAttendanceSheetName = (className: string): string => {
+  return `Absensi ${className}`;
+};
+
+// Function to ensure a specific sheet exists in a spreadsheet with headers, creating it if absent
+export const ensureAttendanceSheetExists = async (
+  spreadsheetId: string,
+  targetSheetName: string
+): Promise<void> => {
+  const token = await getAccessToken();
+  if (!token) throw new Error('Silakan login dengan Google terlebih dahulu.');
+
+  const cleanId = parseSpreadsheetId(spreadsheetId);
+
+  // Check existing sheets
+  const meta = await getSpreadsheetMetadata(cleanId);
+  const exists = meta.sheetNames.some(
+    (name) => name.toLowerCase() === targetSheetName.toLowerCase()
+  );
+
+  if (!exists) {
+    // Add sheet
+    const addSheetResponse = await fetchWithRetry(
+      `https://sheets.googleapis.com/v4/spreadsheets/${cleanId}:batchUpdate`,
+      {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          requests: [
+            {
+              addSheet: {
+                properties: {
+                  title: targetSheetName,
+                  gridProperties: { rowCount: 500, columnCount: 15, frozenRowCount: 1 },
+                },
+              },
+            },
+          ],
+        }),
+      }
+    );
+
+    if (addSheetResponse.ok) {
+      // Add headers
+      const range = `'${targetSheetName}'!A1:N1`;
+      await fetchWithRetry(
+        `https://sheets.googleapis.com/v4/spreadsheets/${cleanId}/values/${encodeURIComponent(
+          range
+        )}?valueInputOption=USER_ENTERED`,
+        {
+          method: 'PUT',
+          headers: {
+            Authorization: `Bearer ${token}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            values: [ATTENDANCE_HEADERS],
+          }),
+        }
+      );
+    }
+  }
+};
+
+// Create a complete, beautifully structured Attendance Spreadsheet on user's Google Drive with separate sheets per class
 export const createMasterAttendanceSpreadsheet = async (
   title = 'Absensi Guru Mapel TJKT - Master'
 ): Promise<{ id: string; url: string; title: string }> => {
@@ -201,32 +287,49 @@ export const createMasterAttendanceSpreadsheet = async (
       title,
     },
     sheets: [
+      // Kelas 10 TJKT
       {
         properties: {
-          title: 'Rekap Absensi Harian',
+          title: 'Absensi 10 TJKT',
           gridProperties: { rowCount: 500, columnCount: 15, frozenRowCount: 1 },
-          tabColor: { red: 0.1, green: 0.6, blue: 0.4 },
+          tabColor: { red: 0.1, green: 0.65, blue: 0.4 },
         },
       },
       {
         properties: {
           title: 'Data Siswa 10 TJKT',
           gridProperties: { rowCount: 100, columnCount: 6, frozenRowCount: 1 },
-          tabColor: { red: 0.2, green: 0.4, blue: 0.8 },
+          tabColor: { red: 0.2, green: 0.45, blue: 0.85 },
+        },
+      },
+      // Kelas 11 TJKT
+      {
+        properties: {
+          title: 'Absensi 11 TJKT',
+          gridProperties: { rowCount: 500, columnCount: 15, frozenRowCount: 1 },
+          tabColor: { red: 0.9, green: 0.55, blue: 0.1 },
         },
       },
       {
         properties: {
           title: 'Data Siswa 11 TJKT',
           gridProperties: { rowCount: 100, columnCount: 6, frozenRowCount: 1 },
-          tabColor: { red: 0.9, green: 0.5, blue: 0.1 },
+          tabColor: { red: 0.95, green: 0.4, blue: 0.15 },
+        },
+      },
+      // Kelas 12 TJKT
+      {
+        properties: {
+          title: 'Absensi 12 TJKT',
+          gridProperties: { rowCount: 500, columnCount: 15, frozenRowCount: 1 },
+          tabColor: { red: 0.65, green: 0.25, blue: 0.75 },
         },
       },
       {
         properties: {
           title: 'Data Siswa 12 TJKT',
           gridProperties: { rowCount: 100, columnCount: 6, frozenRowCount: 1 },
-          tabColor: { red: 0.6, green: 0.2, blue: 0.7 },
+          tabColor: { red: 0.45, green: 0.2, blue: 0.7 },
         },
       },
     ],
@@ -249,55 +352,46 @@ export const createMasterAttendanceSpreadsheet = async (
   const createdSheet = await response.json();
   const spreadsheetId = createdSheet.spreadsheetId;
 
-  // Populate initial headers and data
+  // Populate initial headers and student data for each class sheet
   const valuesData: Array<{ range: string; values: any[][] }> = [
     {
-      range: 'Rekap Absensi Harian!A1:N1',
-      values: [
-        [
-          'ID Sesi',
-          'Timestamp',
-          'Tanggal',
-          'Jam Ke',
-          'Guru Pengampu',
-          'Mata Pelajaran',
-          'Kelas',
-          'NIS',
-          'Nama Siswa',
-          'L/P',
-          'Status Kehadiran (H/I/S/A)',
-          'Keterangan',
-          'Materi / Topik Bahasan',
-          'Persentase Sesi (%)',
-        ],
-      ],
+      range: "'Absensi 10 TJKT'!A1:N1",
+      values: [ATTENDANCE_HEADERS],
+    },
+    {
+      range: "'Absensi 11 TJKT'!A1:N1",
+      values: [ATTENDANCE_HEADERS],
+    },
+    {
+      range: "'Absensi 12 TJKT'!A1:N1",
+      values: [ATTENDANCE_HEADERS],
     },
   ];
 
-  // Populate 10 TJKT
+  // Populate Data Siswa 10 TJKT
   const s10 = INITIAL_STUDENTS.filter((s) => s.className === '10 TJKT');
   valuesData.push({
-    range: 'Data Siswa 10 TJKT!A1:D' + (s10.length + 1),
+    range: "'Data Siswa 10 TJKT'!A1:D" + (s10.length + 1),
     values: [
       ['No', 'NIS', 'Nama Lengkap Siswa', 'Jenis Kelamin (L/P)'],
       ...s10.map((s, idx) => [idx + 1, s.nis, s.name, s.gender]),
     ],
   });
 
-  // Populate 11 TJKT
+  // Populate Data Siswa 11 TJKT
   const s11 = INITIAL_STUDENTS.filter((s) => s.className === '11 TJKT');
   valuesData.push({
-    range: 'Data Siswa 11 TJKT!A1:D' + (s11.length + 1),
+    range: "'Data Siswa 11 TJKT'!A1:D" + (s11.length + 1),
     values: [
       ['No', 'NIS', 'Nama Lengkap Siswa', 'Jenis Kelamin (L/P)'],
       ...s11.map((s, idx) => [idx + 1, s.nis, s.name, s.gender]),
     ],
   });
 
-  // Populate 12 TJKT
+  // Populate Data Siswa 12 TJKT
   const s12 = INITIAL_STUDENTS.filter((s) => s.className === '12 TJKT');
   valuesData.push({
-    range: 'Data Siswa 12 TJKT!A1:D' + (s12.length + 1),
+    range: "'Data Siswa 12 TJKT'!A1:D" + (s12.length + 1),
     values: [
       ['No', 'NIS', 'Nama Lengkap Siswa', 'Jenis Kelamin (L/P)'],
       ...s12.map((s, idx) => [idx + 1, s.nis, s.name, s.gender]),
@@ -327,17 +421,30 @@ export const createMasterAttendanceSpreadsheet = async (
   };
 };
 
-// Append attendance record to the log sheet
+// Append attendance record to the class-specific attendance sheet
 export const appendAttendanceRecordToSheet = async (
   spreadsheetId: string,
-  logSheetName: string,
-  record: AttendanceRecord
+  recordOrSheetName: AttendanceRecord | string,
+  maybeRecord?: AttendanceRecord
 ): Promise<boolean> => {
   const token = await getAccessToken();
   if (!token) throw new Error('Silakan login dengan Google terlebih dahulu.');
 
+  let record: AttendanceRecord;
+  let preferredSheetName: string | undefined;
+
+  if (typeof recordOrSheetName === 'string') {
+    preferredSheetName = recordOrSheetName;
+    record = maybeRecord!;
+  } else {
+    record = recordOrSheetName;
+  }
+
   const cleanId = parseSpreadsheetId(spreadsheetId);
-  const targetSheet = logSheetName || 'Rekap Absensi Harian';
+  // Separate sheet per class: "Absensi 10 TJKT", "Absensi 11 TJKT", "Absensi 12 TJKT"
+  const targetSheet = preferredSheetName && !preferredSheetName.includes('Rekap Absensi Harian')
+    ? preferredSheetName
+    : getTargetAttendanceSheetName(record.className);
 
   // Format rows: one row per student
   const timestamp = new Date().toLocaleString('id-ID', { timeZone: 'Asia/Jakarta' });
@@ -358,12 +465,12 @@ export const appendAttendanceRecordToSheet = async (
     `${record.attendancePercentage}%`,
   ]);
 
-  const range = `${targetSheet}!A:N`;
-  const url = `https://sheets.googleapis.com/v4/spreadsheets/${cleanId}/values/${encodeURIComponent(
+  const range = `'${targetSheet}'!A:N`;
+  const appendUrl = `https://sheets.googleapis.com/v4/spreadsheets/${cleanId}/values/${encodeURIComponent(
     range
   )}:append?valueInputOption=USER_ENTERED&insertDataOption=INSERT_ROWS`;
 
-  const response = await fetchWithRetry(url, {
+  let response = await fetchWithRetry(appendUrl, {
     method: 'POST',
     headers: {
       Authorization: `Bearer ${token}`,
@@ -374,9 +481,29 @@ export const appendAttendanceRecordToSheet = async (
     }),
   });
 
+  // If failed because sheet does not exist (e.g. existing/older spreadsheet), create sheet and retry
   if (!response.ok) {
-    const errorData = await response.json().catch(() => ({}));
-    throw new Error(errorData.error?.message || `Gagal menyimpan absensi ke sheet ${targetSheet}`);
+    const errText = await response.text();
+    if (errText.includes('Unable to parse range') || response.status === 400) {
+      console.info(`Sheet "${targetSheet}" belum ada, membuat sheet otomatis...`);
+      await ensureAttendanceSheetExists(cleanId, targetSheet);
+      // Retry append after creation
+      response = await fetchWithRetry(appendUrl, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          values: rows,
+        }),
+      });
+    }
+
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({}));
+      throw new Error(errorData.error?.message || `Gagal menyimpan absensi ke sheet ${targetSheet}`);
+    }
   }
 
   return true;

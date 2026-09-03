@@ -179,7 +179,6 @@ export default function App() {
           if (token) {
             await appendAttendanceRecordToSheet(
               sheetConfig.spreadsheetId,
-              sheetConfig.logSheetName || 'Rekap Absensi Harian',
               record
             );
             isSynced = true;
@@ -212,7 +211,6 @@ export default function App() {
     try {
       await appendAttendanceRecordToSheet(
         sheetConfig.spreadsheetId,
-        sheetConfig.logSheetName || 'Rekap Absensi Harian',
         record
       );
       const updated = markRecordAsSynced(record.id);

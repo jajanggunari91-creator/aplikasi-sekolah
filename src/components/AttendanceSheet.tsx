@@ -567,7 +567,7 @@ export const AttendanceSheet: React.FC<AttendanceSheetProps> = ({
             <Info className="w-4 h-4 text-blue-400 shrink-0" />
             <span>
               Presensi akan disimpan ke database lokal dan otomatis disinkronkan ke sheet{' '}
-              <strong className="text-white">"Rekap Absensi Harian"</strong> jika Google Sheet terhubung.
+              <strong className="text-emerald-300 font-semibold">"Absensi {selectedClass}"</strong> jika Google Sheet terhubung.
             </span>
           </div>
 

@@ -121,7 +121,7 @@ export const SpreadsheetManagerModal: React.FC<SpreadsheetManagerModalProps> = (
         spreadsheetTitle: res.title,
         spreadsheetUrl: res.url,
         studentSheetName: 'Data Siswa 10 TJKT',
-        logSheetName: 'Rekap Absensi Harian',
+        logSheetName: 'Sheet Terpisah per Kelas (Absensi 10, 11, 12 TJKT)',
         lastSynced: new Date().toISOString(),
       };
       onSaveConfig(newConfig);
@@ -157,7 +157,6 @@ export const SpreadsheetManagerModal: React.FC<SpreadsheetManagerModalProps> = (
     setStatusMessage(null);
     try {
       const meta = await getSpreadsheetMetadata(cleanId);
-      const logSheet = meta.sheetNames.find((s) => s.toLowerCase().includes('rekap') || s.toLowerCase().includes('absen')) || meta.sheetNames[0] || 'Sheet1';
       const studentSheet = meta.sheetNames.find((s) => s.toLowerCase().includes('siswa') || s.toLowerCase().includes('10')) || meta.sheetNames[0] || 'Sheet1';
 
       const config: SheetConfig = {
@@ -165,7 +164,7 @@ export const SpreadsheetManagerModal: React.FC<SpreadsheetManagerModalProps> = (
         spreadsheetTitle: meta.title,
         spreadsheetUrl: meta.url,
         studentSheetName: studentSheet,
-        logSheetName: logSheet,
+        logSheetName: 'Sheet Terpisah per Kelas (Absensi 10, 11, 12 TJKT)',
         lastSynced: new Date().toISOString(),
       };
       onSaveConfig(config);
@@ -253,7 +252,7 @@ export const SpreadsheetManagerModal: React.FC<SpreadsheetManagerModalProps> = (
                 Integrasi Google Spreadsheet
               </h3>
               <p className="text-xs text-slate-300">
-                Data siswa & hasil absensi tersimpan di spreadsheet yang sama dalam sheet terpisah
+                Data siswa & riwayat absensi tersimpan otomatis di sheet terpisah untuk setiap kelas
               </p>
             </div>
           </div>
@@ -372,13 +371,12 @@ export const SpreadsheetManagerModal: React.FC<SpreadsheetManagerModalProps> = (
                       Template Siap Pakai Sesuai Permintaan
                     </h4>
                     <p className="text-xs text-slate-200 mt-1 leading-relaxed">
-                      Sistem akan membuatkan sebuah file Google Spreadsheet lengkap dengan 4 sheet terpisah:
+                      Sistem akan membuatkan sebuah file Google Spreadsheet lengkap dengan sheet terpisah untuk setiap kelas (total 6 sheet terorganisir):
                     </p>
-                    <ul className="text-xs text-slate-300 mt-2 space-y-1 list-disc list-inside font-medium">
-                      <li><strong className="text-emerald-300">Data Siswa 10 TJKT</strong> (Daftar siswa Kelas 10)</li>
-                      <li><strong className="text-emerald-300">Data Siswa 11 TJKT</strong> (Daftar siswa Kelas 11)</li>
-                      <li><strong className="text-emerald-300">Data Siswa 12 TJKT</strong> (Daftar siswa Kelas 12)</li>
-                      <li><strong className="text-emerald-300">Rekap Absensi Harian</strong> (Tempat tersimpannya hasil absensi)</li>
+                    <ul className="text-xs text-slate-300 mt-2 space-y-1.5 list-disc list-inside font-medium">
+                      <li><strong className="text-emerald-300">Absensi 10 TJKT</strong> & <strong className="text-blue-300">Data Siswa 10 TJKT</strong></li>
+                      <li><strong className="text-amber-300">Absensi 11 TJKT</strong> & <strong className="text-orange-300">Data Siswa 11 TJKT</strong></li>
+                      <li><strong className="text-purple-300">Absensi 12 TJKT</strong> & <strong className="text-violet-300">Data Siswa 12 TJKT</strong></li>
                     </ul>
                   </div>
 
@@ -502,8 +500,8 @@ export const SpreadsheetManagerModal: React.FC<SpreadsheetManagerModalProps> = (
                           ID: <span className="font-mono text-emerald-300">{sheetConfig.spreadsheetId}</span>
                         </p>
                         <div className="flex flex-wrap items-center gap-2 mt-2 text-[11px]">
-                          <span className="px-2 py-0.5 bg-white/10 text-emerald-300 rounded-md border border-emerald-500/30 font-semibold">
-                            Sheet Log: {sheetConfig.logSheetName}
+                          <span className="px-2.5 py-1 bg-white/10 text-emerald-300 rounded-lg border border-emerald-500/30 font-semibold">
+                            Penyimpanan Presensi: Sheet Terpisah per Kelas (Absensi 10, 11, 12 TJKT)
                           </span>
                         </div>
                       </div>
@@ -561,7 +559,7 @@ export const SpreadsheetManagerModal: React.FC<SpreadsheetManagerModalProps> = (
       <ConfirmationModal
         isOpen={confirmCreateOpen}
         title="Buat Spreadsheet Master di Google Drive"
-        message={`Apakah Anda ingin membuat file Google Spreadsheet baru "${newSheetTitle}" dengan format 4 sheet terpisah untuk Jurusan TJKT?`}
+        message={`Apakah Anda ingin membuat file Google Spreadsheet baru "${newSheetTitle}" dengan format sheet presensi terpisah untuk setiap kelas Jurusan TJKT?`}
         confirmText="Ya, Buat File Spreadsheet"
         cancelText="Batal"
         type="primary"
@@ -569,8 +567,9 @@ export const SpreadsheetManagerModal: React.FC<SpreadsheetManagerModalProps> = (
         onCancel={() => setConfirmCreateOpen(false)}
         details={[
           { label: 'Nama File', value: newSheetTitle },
-          { label: 'Sheet Siswa', value: '10 TJKT, 11 TJKT, 12 TJKT' },
-          { label: 'Sheet Log Presensi', value: 'Rekap Absensi Harian' },
+          { label: 'Sheet Presensi Per Kelas', value: 'Absensi 10 TJKT, Absensi 11 TJKT, Absensi 12 TJKT' },
+          { label: 'Sheet Data Siswa', value: 'Data Siswa 10 TJKT, 11 TJKT, 12 TJKT' },
+          { label: 'Total Sheet Dibuat', value: '6 Sheet Terorganisir' },
           { label: 'Lokasi Simpan', value: 'Google Drive Akun Anda' },
         ]}
       />
