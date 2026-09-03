@@ -208,6 +208,11 @@ export default function App() {
       return false;
     }
 
+    if (!user) {
+      await handleGoogleLogin();
+      return false;
+    }
+
     try {
       await appendAttendanceRecordToSheet(
         sheetConfig.spreadsheetId,

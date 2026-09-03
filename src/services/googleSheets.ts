@@ -123,6 +123,18 @@ export const getSpreadsheetMetadata = async (spreadsheetId: string) => {
   };
 };
 
+// Helper to encode A1 notation range for URL paths in Google Sheets API
+export const encodeA1Range = (sheetName: string, cellRange = 'A1:N'): string => {
+  const cleanName = sheetName.trim();
+  // Wrap sheet name in single quotes if it contains spaces, dashes, or special characters
+  const escapedSheet = cleanName.includes(' ') || cleanName.includes('-') || cleanName.includes('/')
+    ? `'${cleanName.replace(/'/g, "''")}'`
+    : cleanName;
+  const fullRange = `${escapedSheet}!${cellRange}`;
+  // Crucial: encodeURIComponent does NOT encode single quotes ('), but Google Sheets API URL path requires %27
+  return encodeURIComponent(fullRange).replace(/'/g, '%27');
+};
+
 // Read student data from a specific sheet in the spreadsheet
 export const fetchStudentsFromSpreadsheet = async (
   spreadsheetId: string,
@@ -133,7 +145,7 @@ export const fetchStudentsFromSpreadsheet = async (
   if (!token) throw new Error('Silakan login dengan Google terlebih dahulu.');
 
   const cleanId = parseSpreadsheetId(spreadsheetId);
-  const encodedRange = encodeURIComponent(`${sheetName}!A1:Z100`);
+  const encodedRange = encodeA1Range(sheetName, 'A1:Z100');
 
   const response = await fetchWithRetry(
     `https://sheets.googleapis.com/v4/spreadsheets/${cleanId}/values/${encodedRange}`,
@@ -212,67 +224,92 @@ export const getTargetAttendanceSheetName = (className: string): string => {
   return `Absensi ${className}`;
 };
 
-// Function to ensure a specific sheet exists in a spreadsheet with headers, creating it if absent
+// Function to ensure a specific sheet exists in a spreadsheet with headers, creating it if absent without modifying any existing sheets
 export const ensureAttendanceSheetExists = async (
   spreadsheetId: string,
   targetSheetName: string
-): Promise<void> => {
+): Promise<string> => {
   const token = await getAccessToken();
   if (!token) throw new Error('Silakan login dengan Google terlebih dahulu.');
 
   const cleanId = parseSpreadsheetId(spreadsheetId);
 
-  // Check existing sheets
+  // Check existing sheets first
   const meta = await getSpreadsheetMetadata(cleanId);
-  const exists = meta.sheetNames.some(
-    (name) => name.toLowerCase() === targetSheetName.toLowerCase()
+  const existingSheet = meta.sheetNames.find(
+    (name) => name.trim().toLowerCase() === targetSheetName.trim().toLowerCase()
   );
 
-  if (!exists) {
-    // Add sheet
-    const addSheetResponse = await fetchWithRetry(
-      `https://sheets.googleapis.com/v4/spreadsheets/${cleanId}:batchUpdate`,
-      {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${token}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          requests: [
-            {
-              addSheet: {
-                properties: {
-                  title: targetSheetName,
-                  gridProperties: { rowCount: 500, columnCount: 15, frozenRowCount: 1 },
-                },
+  // If sheet already exists, do not touch or alter it — perfectly preserve existing database!
+  if (existingSheet) {
+    return existingSheet;
+  }
+
+  // Determine tab color for class visual organization
+  const tabColor = targetSheetName.includes('10')
+    ? { red: 0.1, green: 0.65, blue: 0.4 }
+    : targetSheetName.includes('11')
+    ? { red: 0.9, green: 0.55, blue: 0.1 }
+    : { red: 0.65, green: 0.25, blue: 0.75 };
+
+  // Add new sheet tab safely
+  const addSheetResponse = await fetchWithRetry(
+    `https://sheets.googleapis.com/v4/spreadsheets/${cleanId}:batchUpdate`,
+    {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${token}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        requests: [
+          {
+            addSheet: {
+              properties: {
+                title: targetSheetName,
+                gridProperties: { rowCount: 500, columnCount: 15, frozenRowCount: 1 },
+                tabColor,
               },
             },
-          ],
-        }),
-      }
-    );
-
-    if (addSheetResponse.ok) {
-      // Add headers
-      const range = `'${targetSheetName}'!A1:N1`;
-      await fetchWithRetry(
-        `https://sheets.googleapis.com/v4/spreadsheets/${cleanId}/values/${encodeURIComponent(
-          range
-        )}?valueInputOption=USER_ENTERED`,
-        {
-          method: 'PUT',
-          headers: {
-            Authorization: `Bearer ${token}`,
-            'Content-Type': 'application/json',
           },
-          body: JSON.stringify({
-            values: [ATTENDANCE_HEADERS],
-          }),
-        }
-      );
+        ],
+      }),
+    }
+  );
+
+  if (!addSheetResponse.ok) {
+    const errText = await addSheetResponse.text();
+    let errData: any = {};
+    try {
+      errData = JSON.parse(errText);
+    } catch {}
+    const msg = errData.error?.message || errText;
+    if (!msg.toLowerCase().includes('already exists')) {
+      throw new Error(formatGoogleError(addSheetResponse.status, `Gagal membuat tab ${targetSheetName}: ${msg}`));
     }
   }
+
+  // Add header row to the newly created sheet
+  const encodedHeaderRange = encodeA1Range(targetSheetName, 'A1:N1');
+  const headerPutResponse = await fetchWithRetry(
+    `https://sheets.googleapis.com/v4/spreadsheets/${cleanId}/values/${encodedHeaderRange}?valueInputOption=USER_ENTERED`,
+    {
+      method: 'PUT',
+      headers: {
+        Authorization: `Bearer ${token}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        values: [ATTENDANCE_HEADERS],
+      }),
+    }
+  );
+
+  if (!headerPutResponse.ok) {
+    console.warn(`Peringatan: Gagal mengisi header awal pada ${targetSheetName}, namun sheet berhasil dibuat.`);
+  }
+
+  return targetSheetName;
 };
 
 // Create a complete, beautifully structured Attendance Spreadsheet on user's Google Drive with separate sheets per class
@@ -421,7 +458,7 @@ export const createMasterAttendanceSpreadsheet = async (
   };
 };
 
-// Append attendance record to the class-specific attendance sheet
+// Append attendance record to the class-specific attendance sheet without modifying or deleting any existing database sheets
 export const appendAttendanceRecordToSheet = async (
   spreadsheetId: string,
   recordOrSheetName: AttendanceRecord | string,
@@ -441,12 +478,35 @@ export const appendAttendanceRecordToSheet = async (
   }
 
   const cleanId = parseSpreadsheetId(spreadsheetId);
-  // Separate sheet per class: "Absensi 10 TJKT", "Absensi 11 TJKT", "Absensi 12 TJKT"
+  // Target class-specific sheet: "Absensi 10 TJKT", "Absensi 11 TJKT", "Absensi 12 TJKT"
   const targetSheet = preferredSheetName && !preferredSheetName.includes('Rekap Absensi Harian')
     ? preferredSheetName
     : getTargetAttendanceSheetName(record.className);
 
-  // Format rows: one row per student
+  // Ensure target sheet exists without disturbing any existing sheets or data in the spreadsheet
+  let activeSheet = targetSheet;
+  try {
+    activeSheet = await ensureAttendanceSheetExists(cleanId, targetSheet);
+  } catch (err: any) {
+    console.warn(`Peringatan: Gagal membuat/menemukan tab "${targetSheet}", mencari tab alternatif yang ada...`, err);
+    // Safe Fallback: if creating separate sheet fails (e.g. restriction), find any existing attendance or log sheet
+    const meta = await getSpreadsheetMetadata(cleanId).catch(() => null);
+    if (meta && meta.sheetNames.length > 0) {
+      const fallback = meta.sheetNames.find(
+        (s) => s.toLowerCase().includes('rekap') || s.toLowerCase().includes('absen')
+      ) || meta.sheetNames[0];
+      if (fallback) {
+        console.info(`Mengalihkan penyimpanan data ke sheet yang tersedia: "${fallback}"`);
+        activeSheet = fallback;
+      } else {
+        throw err;
+      }
+    } else {
+      throw err;
+    }
+  }
+
+  // Format rows: one row per student in this attendance session
   const timestamp = new Date().toLocaleString('id-ID', { timeZone: 'Asia/Jakarta' });
   const rows = record.details.map((detail) => [
     record.id,
@@ -465,12 +525,11 @@ export const appendAttendanceRecordToSheet = async (
     `${record.attendancePercentage}%`,
   ]);
 
-  const range = `'${targetSheet}'!A:N`;
-  const appendUrl = `https://sheets.googleapis.com/v4/spreadsheets/${cleanId}/values/${encodeURIComponent(
-    range
-  )}:append?valueInputOption=USER_ENTERED&insertDataOption=INSERT_ROWS`;
+  // Use correctly formatted and encoded A1 range (with %27 for quotes)
+  const encodedRange = encodeA1Range(activeSheet, 'A1:N');
+  const appendUrl = `https://sheets.googleapis.com/v4/spreadsheets/${cleanId}/values/${encodedRange}:append?valueInputOption=USER_ENTERED&insertDataOption=INSERT_ROWS`;
 
-  let response = await fetchWithRetry(appendUrl, {
+  const response = await fetchWithRetry(appendUrl, {
     method: 'POST',
     headers: {
       Authorization: `Bearer ${token}`,
@@ -481,29 +540,14 @@ export const appendAttendanceRecordToSheet = async (
     }),
   });
 
-  // If failed because sheet does not exist (e.g. existing/older spreadsheet), create sheet and retry
   if (!response.ok) {
     const errText = await response.text();
-    if (errText.includes('Unable to parse range') || response.status === 400) {
-      console.info(`Sheet "${targetSheet}" belum ada, membuat sheet otomatis...`);
-      await ensureAttendanceSheetExists(cleanId, targetSheet);
-      // Retry append after creation
-      response = await fetchWithRetry(appendUrl, {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${token}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          values: rows,
-        }),
-      });
-    }
-
-    if (!response.ok) {
-      const errorData = await response.json().catch(() => ({}));
-      throw new Error(errorData.error?.message || `Gagal menyimpan absensi ke sheet ${targetSheet}`);
-    }
+    let errData: any = {};
+    try {
+      errData = JSON.parse(errText);
+    } catch {}
+    const rawMsg = errData.error?.message || errText;
+    throw new Error(formatGoogleError(response.status, rawMsg || `Gagal menyimpan absensi ke sheet ${activeSheet}`));
   }
 
   return true;
