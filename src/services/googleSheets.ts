@@ -1,5 +1,12 @@
 import { getAccessToken } from './googleAuth';
-import { AttendanceRecord, Student, ClassGrade } from '../types';
+import {
+  AttendanceRecord,
+  AttendanceItem,
+  AttendanceStatus,
+  Student,
+  ClassGrade,
+  SheetConfig,
+} from '../types';
 import { INITIAL_STUDENTS } from '../data/initialData';
 
 export interface DriveSpreadsheetItem {
@@ -552,3 +559,298 @@ export const appendAttendanceRecordToSheet = async (
 
   return true;
 };
+
+// Fetch attendance records from Google Spreadsheet database
+export const fetchAttendanceRecordsFromSpreadsheet = async (
+  spreadsheetId: string
+): Promise<AttendanceRecord[]> => {
+  const token = await getAccessToken();
+  if (!token) throw new Error('Silakan login dengan Google terlebih dahulu.');
+
+  const cleanId = parseSpreadsheetId(spreadsheetId);
+  const meta = await getSpreadsheetMetadata(cleanId);
+
+  // Identify all sheets that contain attendance data
+  const candidateSheets = meta.sheetNames.filter((name) => {
+    const lower = name.toLowerCase().trim();
+    return (
+      lower.includes('absen') ||
+      lower.includes('rekap') ||
+      lower.includes('presensi') ||
+      lower.includes('kehadiran')
+    );
+  });
+
+  const targetSheets =
+    candidateSheets.length > 0
+      ? candidateSheets
+      : meta.sheetNames.filter((name) => {
+          const lower = name.toLowerCase().trim();
+          return !lower.includes('siswa') && !lower.includes('student');
+        });
+
+  if (targetSheets.length === 0) {
+    return [];
+  }
+
+  interface IntermediateSession {
+    id: string;
+    date: string;
+    timestamp: string;
+    period: string;
+    teacherName: string;
+    subject: string;
+    className: ClassGrade;
+    topic: string;
+    details: AttendanceItem[];
+  }
+
+  const sessionMap = new Map<string, IntermediateSession>();
+
+  for (const sheetName of targetSheets) {
+    try {
+      const encodedRange = encodeA1Range(sheetName, 'A1:N3000');
+      const resp = await fetchWithRetry(
+        `https://sheets.googleapis.com/v4/spreadsheets/${cleanId}/values/${encodedRange}`,
+        {
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+        }
+      );
+
+      if (!resp.ok) continue;
+
+      const json = await resp.json();
+      const rows: any[][] = json.values || [];
+      if (!rows || rows.length === 0) continue;
+
+      // Detect header row index
+      let headerRowIdx = -1;
+      for (let i = 0; i < Math.min(5, rows.length); i++) {
+        const rStr = rows[i].map((c) => String(c || '').toLowerCase()).join(' ');
+        if (
+          (rStr.includes('nama') || rStr.includes('nis') || rStr.includes('siswa')) &&
+          (rStr.includes('status') || rStr.includes('kehadiran') || rStr.includes('tanggal') || rStr.includes('sesi') || rStr.includes('jam'))
+        ) {
+          headerRowIdx = i;
+          break;
+        }
+      }
+
+      // Column mapping
+      let idIdx = 0;
+      let timestampIdx = 1;
+      let dateIdx = 2;
+      let periodIdx = 3;
+      let teacherIdx = 4;
+      let subjectIdx = 5;
+      let classIdx = 6;
+      let nisIdx = 7;
+      let nameIdx = 8;
+      let genderIdx = 9;
+      let statusIdx = 10;
+      let notesIdx = 11;
+      let topicIdx = 12;
+
+      if (headerRowIdx !== -1) {
+        const headers = rows[headerRowIdx];
+        headers.forEach((h: any, idx: number) => {
+          const col = String(h || '').trim().toLowerCase();
+          if ((col.includes('id sesi') || col === 'id' || col.includes('sesi id')) && idIdx === 0) idIdx = idx;
+          else if ((col.includes('timestamp') || col.includes('waktu')) && timestampIdx === 1) timestampIdx = idx;
+          else if ((col.includes('tanggal') || col.includes('date')) && dateIdx === 2) dateIdx = idx;
+          else if ((col.includes('jam') || col.includes('period') || col.includes('periode')) && periodIdx === 3) periodIdx = idx;
+          else if ((col.includes('guru') || col.includes('pengampu') || col.includes('teacher')) && teacherIdx === 4) teacherIdx = idx;
+          else if ((col.includes('mata pelajaran') || col.includes('mapel') || col.includes('subject')) && subjectIdx === 5) subjectIdx = idx;
+          else if ((col.includes('kelas') || col.includes('class')) && classIdx === 6) classIdx = idx;
+          else if ((col === 'nis' || col === 'nisn' || col.includes('nis')) && nisIdx === 7) nisIdx = idx;
+          else if ((col.includes('nama') || col.includes('siswa') || col.includes('student')) && nameIdx === 8) nameIdx = idx;
+          else if ((col.includes('l/p') || col.includes('gender') || col.includes('jenis kelamin')) && genderIdx === 9) genderIdx = idx;
+          else if ((col.includes('status') || col.includes('kehadiran')) && statusIdx === 10) statusIdx = idx;
+          else if ((col.includes('keterangan') || col.includes('catatan') || col.includes('notes')) && notesIdx === 11) notesIdx = idx;
+          else if ((col.includes('materi') || col.includes('topik') || col.includes('bahasan')) && topicIdx === 12) topicIdx = idx;
+        });
+      }
+
+      const startRow = headerRowIdx !== -1 ? headerRowIdx + 1 : 1;
+
+      for (let r = startRow; r < rows.length; r++) {
+        const row = rows[r];
+        if (!row || row.length < 3) continue;
+
+        const rawId = String(row[idIdx] || '').trim();
+        const rawTimestamp = String(row[timestampIdx] || '').trim();
+        const rawDate = String(row[dateIdx] || '').trim();
+        const rawPeriod = String(row[periodIdx] || '').trim();
+        const rawTeacher = String(row[teacherIdx] || '').trim();
+        const rawSubject = String(row[subjectIdx] || '').trim();
+        let rawClass = String(row[classIdx] || '').trim();
+        const rawNis = String(row[nisIdx] || '').trim();
+        const rawName = String(row[nameIdx] || '').trim();
+        const rawGender = String(row[genderIdx] || '').trim().toUpperCase();
+        const rawStatus = String(row[statusIdx] || '').trim().toUpperCase();
+        const rawNotes = String(row[notesIdx] || '').trim();
+        const rawTopic = String(row[topicIdx] || '').trim();
+
+        // Skip headers if repeated
+        if (
+          rawName.toLowerCase().includes('nama') ||
+          rawDate.toLowerCase().includes('tanggal') ||
+          rawId.toLowerCase().includes('id sesi')
+        ) {
+          continue;
+        }
+
+        // Must have some identifier or student
+        if (!rawName && !rawNis && !rawDate) continue;
+
+        // Resolve class name
+        if (!rawClass) {
+          if (sheetName.includes('10')) rawClass = '10 TJKT';
+          else if (sheetName.includes('11')) rawClass = '11 TJKT';
+          else if (sheetName.includes('12')) rawClass = '12 TJKT';
+          else rawClass = '10 TJKT';
+        } else {
+          if (rawClass.includes('10')) rawClass = '10 TJKT';
+          else if (rawClass.includes('11')) rawClass = '11 TJKT';
+          else if (rawClass.includes('12')) rawClass = '12 TJKT';
+        }
+
+        const validClass = (['10 TJKT', '11 TJKT', '12 TJKT'].includes(rawClass)
+          ? rawClass
+          : '10 TJKT') as ClassGrade;
+
+        // Session ID key
+        const sessionId =
+          rawId ||
+          `ses_${rawDate}_${rawPeriod}_${validClass}_${rawSubject}_${rawTeacher}`.replace(/[^a-zA-Z0-9_-]/g, '_');
+
+        if (!sessionMap.has(sessionId)) {
+          sessionMap.set(sessionId, {
+            id: sessionId,
+            date: rawDate || new Date().toISOString().split('T')[0],
+            timestamp: rawTimestamp,
+            period: rawPeriod || 'Jam ke 1 - 2',
+            teacherName: rawTeacher || 'Guru Pengampu',
+            subject: rawSubject || 'Mata Pelajaran',
+            className: validClass,
+            topic: rawTopic && rawTopic !== '-' ? rawTopic : '',
+            details: [],
+          });
+        }
+
+        const session = sessionMap.get(sessionId)!;
+
+        // Student details
+        const gender: 'L' | 'P' = rawGender.startsWith('P') ? 'P' : 'L';
+        const validStatuses = ['H', 'I', 'S', 'A'];
+        const status: AttendanceStatus = validStatuses.includes(rawStatus)
+          ? (rawStatus as AttendanceStatus)
+          : rawStatus.startsWith('H')
+          ? 'H'
+          : rawStatus.startsWith('I')
+          ? 'I'
+          : rawStatus.startsWith('S')
+          ? 'S'
+          : rawStatus.startsWith('A')
+          ? 'A'
+          : 'H';
+
+        session.details.push({
+          studentId: rawNis || `${session.className}-${session.details.length + 1}`,
+          nis: rawNis,
+          studentName: rawName || 'Siswa',
+          gender,
+          status,
+          notes: rawNotes && rawNotes !== '-' ? rawNotes : '',
+        });
+      }
+    } catch (sheetErr) {
+      console.warn(`Peringatan: Gagal membaca data dari tab ${sheetName}:`, sheetErr);
+    }
+  }
+
+  // Convert sessions to AttendanceRecord[]
+  const records: AttendanceRecord[] = [];
+  sessionMap.forEach((session) => {
+    const totalStudents = session.details.length;
+    const presentCount = session.details.filter((d) => d.status === 'H').length;
+    const permissionCount = session.details.filter((d) => d.status === 'I').length;
+    const sickCount = session.details.filter((d) => d.status === 'S').length;
+    const absentCount = session.details.filter((d) => d.status === 'A').length;
+    const attendancePercentage =
+      totalStudents > 0 ? Math.round((presentCount / totalStudents) * 100) : 100;
+
+    let sessionTime = '07:30';
+    if (session.timestamp) {
+      const timeMatch = session.timestamp.match(/(\d{1,2}[:.]\d{2})/);
+      if (timeMatch) sessionTime = timeMatch[1].replace('.', ':');
+    }
+
+    records.push({
+      id: session.id,
+      date: session.date,
+      time: sessionTime,
+      period: session.period,
+      teacherName: session.teacherName,
+      subject: session.subject,
+      className: session.className,
+      topic: session.topic || '-',
+      totalStudents,
+      presentCount,
+      permissionCount,
+      sickCount,
+      absentCount,
+      attendancePercentage,
+      details: session.details,
+      spreadsheetSynced: true,
+      syncedAt: session.timestamp || new Date().toISOString(),
+    });
+  });
+
+  // Sort descending by date, then id
+  records.sort((a, b) => {
+    const dateCmp = (b.date || '').localeCompare(a.date || '');
+    if (dateCmp !== 0) return dateCmp;
+    return (b.id || '').localeCompare(a.id || '');
+  });
+
+  return records;
+};
+
+// Automatically discover an existing attendance spreadsheet on user's Google Drive
+export const autoDiscoverAttendanceSpreadsheet = async (): Promise<SheetConfig | null> => {
+  try {
+    const token = await getAccessToken();
+    if (!token) return null;
+
+    const files = await listSpreadsheets();
+    if (!files || files.length === 0) return null;
+
+    // Look for attendance spreadsheet created previously
+    const matched =
+      files.find((f) => /absensi|presensi|tjkt/i.test(f.name)) || files[0];
+
+    if (!matched) return null;
+
+    const meta = await getSpreadsheetMetadata(matched.id);
+    const studentSheetName =
+      meta.sheetNames.find((s) => s.toLowerCase().includes('siswa')) ||
+      meta.sheetNames[0] ||
+      'Data Siswa';
+
+    return {
+      spreadsheetId: matched.id,
+      spreadsheetTitle: matched.name,
+      spreadsheetUrl: matched.webViewLink || meta.url,
+      studentSheetName,
+      logSheetName: 'Sheet Terpisah per Kelas (Absensi 10, 11, 12 TJKT)',
+      lastSynced: new Date().toISOString(),
+    };
+  } catch (e) {
+    console.warn('Gagal mencari spreadsheet secara otomatis di Google Drive:', e);
+    return null;
+  }
+};
+

@@ -118,3 +118,44 @@ export const markRecordAsSynced = (id: string) => {
   }
   return updated;
 };
+
+// Merge incoming records (e.g. from Google Sheets) with local records
+export const mergeAttendanceRecords = (incoming: AttendanceRecord[]): AttendanceRecord[] => {
+  const current = getAttendanceRecords();
+  const map = new Map<string, AttendanceRecord>();
+
+  // 1. Put incoming records from spreadsheet (authoritative for synced records)
+  incoming.forEach((rec) => {
+    map.set(rec.id, { ...rec, spreadsheetSynced: true });
+  });
+
+  // 2. Keep local records if not present in spreadsheet or if unsynced
+  current.forEach((rec) => {
+    if (!map.has(rec.id)) {
+      map.set(rec.id, rec);
+    } else {
+      const existing = map.get(rec.id)!;
+      // If locally it was marked unsynced or modified, preserve unsynced status
+      if (!rec.spreadsheetSynced) {
+        map.set(rec.id, rec);
+      }
+    }
+  });
+
+  // 3. Sort by date descending, then time/id descending
+  const merged = Array.from(map.values()).sort((a, b) => {
+    const dateComp = (b.date || '').localeCompare(a.date || '');
+    if (dateComp !== 0) return dateComp;
+    const timeComp = (b.time || '').localeCompare(a.time || '');
+    if (timeComp !== 0) return timeComp;
+    return (b.id || '').localeCompare(a.id || '');
+  });
+
+  try {
+    localStorage.setItem(STORAGE_KEYS.ATTENDANCE_RECORDS, JSON.stringify(merged));
+  } catch (e) {
+    console.error('Error saving merged attendance records:', e);
+  }
+
+  return merged;
+};

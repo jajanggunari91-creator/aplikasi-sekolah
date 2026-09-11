@@ -22,12 +22,16 @@ interface HistoryLogProps {
   records: AttendanceRecord[];
   sheetConfig: SheetConfig | null;
   onSyncRecordToSheet: (record: AttendanceRecord) => Promise<boolean>;
+  onRefreshFromSheet?: () => Promise<void>;
+  isRefreshingFromSheet?: boolean;
 }
 
 export const HistoryLog: React.FC<HistoryLogProps> = ({
   records,
   sheetConfig,
   onSyncRecordToSheet,
+  onRefreshFromSheet,
+  isRefreshingFromSheet = false,
 }) => {
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedClassFilter, setSelectedClassFilter] = useState('ALL');
@@ -94,12 +98,26 @@ export const HistoryLog: React.FC<HistoryLogProps> = ({
               <span>Riwayat & Arsip Presensi Pembelajaran</span>
             </h2>
             <p className="text-xs text-slate-300 mt-0.5">
-              Daftar sesi presensi yang tersimpan di sistem dan status sinkronisasi ke spreadsheet
+              Daftar sesi presensi tersimpan otomatis dan tersinkronisasi dengan Google Spreadsheet
             </p>
           </div>
-          <span className="text-xs font-bold text-blue-300 px-3 py-1 bg-blue-500/20 border border-blue-400/30 rounded-full self-start sm:self-auto">
-            Total {records.length} Sesi
-          </span>
+          <div className="flex items-center gap-2.5 self-start sm:self-auto flex-wrap">
+            {onRefreshFromSheet && (
+              <button
+                type="button"
+                onClick={() => onRefreshFromSheet()}
+                disabled={isRefreshingFromSheet}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 border border-emerald-400/30 rounded-xl text-xs font-bold transition-all cursor-pointer disabled:opacity-50 shadow-sm"
+                title="Tarik riwayat absensi sebelumnya langsung dari Google Spreadsheet"
+              >
+                <RefreshCw className={`w-3.5 h-3.5 ${isRefreshingFromSheet ? 'animate-spin text-emerald-300' : ''}`} />
+                <span>{isRefreshingFromSheet ? 'Menarik Data...' : 'Tarik dari Spreadsheet'}</span>
+              </button>
+            )}
+            <span className="text-xs font-bold text-blue-300 px-3 py-1.5 bg-blue-500/20 border border-blue-400/30 rounded-xl">
+              Total {records.length} Sesi
+            </span>
+          </div>
         </div>
 
         {/* Filter Controls */}
@@ -138,12 +156,26 @@ export const HistoryLog: React.FC<HistoryLogProps> = ({
       {filteredRecords.length === 0 ? (
         <div className="bg-white/10 backdrop-blur-xl rounded-2xl border border-white/10 p-12 text-center text-slate-400 shadow-2xl">
           <AlertCircle className="w-10 h-10 mx-auto mb-2 text-slate-500" />
-          <p className="font-semibold text-slate-200">Belum ada riwayat presensi</p>
-          <p className="text-xs text-slate-400 mt-1">
-            Data presensi yang Anda simpan akan otomatis tercatat di halaman riwayat ini.
+          <p className="font-semibold text-slate-200">Belum ada riwayat presensi yang dimuat</p>
+          <p className="text-xs text-slate-400 mt-1 max-w-md mx-auto">
+            Jika presensi sebelumnya sudah ada di database spreadsheet Google Anda, klik tombol di bawah untuk menarik dan menampilkan riwayat secara instan.
           </p>
+          {onRefreshFromSheet && (
+            <div className="mt-4">
+              <button
+                type="button"
+                onClick={() => onRefreshFromSheet()}
+                disabled={isRefreshingFromSheet}
+                className="inline-flex items-center gap-2 px-4 py-2.5 bg-blue-600 hover:bg-blue-500 text-white rounded-xl text-xs font-bold shadow-lg shadow-blue-500/20 transition-all cursor-pointer disabled:opacity-50"
+              >
+                <RefreshCw className={`w-4 h-4 ${isRefreshingFromSheet ? 'animate-spin' : ''}`} />
+                <span>{isRefreshingFromSheet ? 'Sedang Menarik Riwayat dari Spreadsheet...' : 'Tarik Riwayat dari Spreadsheet'}</span>
+              </button>
+            </div>
+          )}
         </div>
       ) : (
+
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           {filteredRecords.map((record) => (
             <div

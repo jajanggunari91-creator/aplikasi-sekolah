@@ -16,8 +16,13 @@ import {
   getAttendanceRecords,
   saveAttendanceRecord,
   markRecordAsSynced,
+  mergeAttendanceRecords,
 } from './services/storage';
-import { appendAttendanceRecordToSheet } from './services/googleSheets';
+import {
+  appendAttendanceRecordToSheet,
+  fetchAttendanceRecordsFromSpreadsheet,
+  autoDiscoverAttendanceSpreadsheet,
+} from './services/googleSheets';
 import {
   ClassGrade,
   Student,
@@ -63,6 +68,44 @@ export default function App() {
     getAttendanceRecords()
   );
   const [isSaving, setIsSaving] = useState(false);
+  const [isSyncingHistory, setIsSyncingHistory] = useState(false);
+
+  // Sync attendance history from Google Sheets database
+  const syncHistoryFromSpreadsheet = useCallback(
+    async (targetConfig?: SheetConfig | null) => {
+      let cfg = targetConfig !== undefined ? targetConfig : sheetConfig;
+
+      // If user is logged in but no spreadsheet is configured yet, try auto-discovering from Google Drive
+      if (!cfg) {
+        try {
+          const autoFound = await autoDiscoverAttendanceSpreadsheet();
+          if (autoFound) {
+            cfg = autoFound;
+            setSheetConfig(autoFound);
+            saveSheetConfig(autoFound);
+          }
+        } catch (e) {
+          console.warn('Auto discover spreadsheet skipped:', e);
+        }
+      }
+
+      if (!cfg?.spreadsheetId) return;
+
+      setIsSyncingHistory(true);
+      try {
+        const recordsFromSheet = await fetchAttendanceRecordsFromSpreadsheet(cfg.spreadsheetId);
+        if (recordsFromSheet && recordsFromSheet.length > 0) {
+          const merged = mergeAttendanceRecords(recordsFromSheet);
+          setAttendanceRecords(merged);
+        }
+      } catch (err: any) {
+        console.warn('Gagal memuat riwayat presensi dari Google Sheets:', err);
+      } finally {
+        setIsSyncingHistory(false);
+      }
+    },
+    [sheetConfig]
+  );
 
   // Init Auth on mount
   useEffect(() => {
@@ -82,6 +125,13 @@ export default function App() {
       if (typeof unsubscribe === 'function') unsubscribe();
     };
   }, []);
+
+  // Automatically fetch & merge attendance history whenever user logs in or sheet is connected
+  useEffect(() => {
+    if (user) {
+      syncHistoryFromSpreadsheet();
+    }
+  }, [user, sheetConfig?.spreadsheetId, syncHistoryFromSpreadsheet]);
 
   // Update students when selectedClass changes
   useEffect(() => {
@@ -109,6 +159,8 @@ export default function App() {
         if (!teacherName && res.user.displayName) {
           setTeacherName(res.user.displayName);
         }
+        // Fetch previous attendance history immediately on login
+        syncHistoryFromSpreadsheet();
       }
     } catch (err: any) {
       console.error('Google Sign in failed:', err);
@@ -148,6 +200,9 @@ export default function App() {
   const handleSaveSheetConfig = (config: SheetConfig | null) => {
     setSheetConfig(config);
     saveSheetConfig(config);
+    if (config && user) {
+      syncHistoryFromSpreadsheet(config);
+    }
   };
 
   // Update student roster from Sheet
@@ -308,6 +363,8 @@ export default function App() {
               records={attendanceRecords}
               sheetConfig={sheetConfig}
               onSyncRecordToSheet={handleSyncRecordToSheet}
+              onRefreshFromSheet={() => syncHistoryFromSpreadsheet()}
+              isRefreshingFromSheet={isSyncingHistory}
             />
           </div>
         )}
